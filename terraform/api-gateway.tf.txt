@@ -1,0 +1,67 @@
+resource "aws_api_gateway_rest_api" "this" {
+  body = local.body
+  name = var.generic.project_name
+
+  endpoint_configuration {
+    types = ["REGIONAL"]
+  }
+
+  provider = aws.infrastructure
+}
+
+resource "aws_lambda_permission" "this" {
+  for_each = aws_lambda_function.this
+
+  action        = "lambda:InvokeFunction"
+  function_name = each.value.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.this.execution_arn}/${terraform.workspace}/*"
+  statement_id  = "APIInvokePermission"
+
+  provider = aws.infrastructure
+}
+
+resource "aws_api_gateway_deployment" "this" {
+  rest_api_id = aws_api_gateway_rest_api.this.id
+
+  triggers = {
+    redeployment = sha1(local.body)
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  provider = aws.infrastructure
+}
+
+resource "aws_api_gateway_stage" "this" {
+  deployment_id = aws_api_gateway_deployment.this.id
+  rest_api_id   = aws_api_gateway_rest_api.this.id
+  stage_name    = terraform.workspace
+
+  provider = aws.infrastructure
+}
+
+/*----------
+  | Locals |
+  ----------*/
+
+locals {
+  body = templatefile("./src/apigateway/specification.json.tftpl", local.body_placeholder_mappings)
+
+  body_placeholder_mappings = merge(local.placeholder_mappings, local.lambda_invoke_arns, local.generic_methods)
+
+  generic_methods = {
+    options_method   = file("./src/apigateway/replaces/options_method.json")
+    generic_response = file("./src/apigateway/replaces/generic_response.json")
+  }
+}
+
+/*-----------
+  | Outputs |
+  -----------*/
+
+# output "body" {
+#   value = local.body
+# }
